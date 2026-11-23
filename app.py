@@ -51,15 +51,33 @@ from storage.history_manager import (
     get_history,
     save_scan,
 )
+from core.analytics import (
+    FILTER_ALL_TIME,
+    FILTER_LAST_7_DAYS,
+    FILTER_TODAY,
+    RISK_HIGH,
+    RISK_LOW,
+    RISK_MEDIUM,
+    TIME_FILTERS,
+    AnalyticsMetrics,
+    clean_history_records,
+    compute_metrics,
+    filter_history_by_window,
+    get_daily_trend_data,
+    get_hourly_distribution_data,
+    get_top_hostnames_data,
+)
+import plotly.graph_objects as go
 
 # ============================================================================
 # 2. Navigation Constants
 # ============================================================================
 PAGE_HOME = "🏠 Home / Dashboard"
 PAGE_RESULTS = "📊 Analysis Results"
+PAGE_ANALYTICS = "📈 Analytics & Trends"
 PAGE_HISTORY = "📜 Scan History"
 PAGE_ABOUT = "ℹ️ About Project"
-PAGES = [PAGE_HOME, PAGE_RESULTS, PAGE_HISTORY, PAGE_ABOUT]
+PAGES = [PAGE_HOME, PAGE_RESULTS, PAGE_ANALYTICS, PAGE_HISTORY, PAGE_ABOUT]
 
 # Demonstration Preset Samples for College Evaluator Walkthrough
 PRESETS = [
@@ -300,6 +318,83 @@ div[data-baseweb="input"] input {
 /* Progress bar container */
 .stProgress > div > div > div > div {
     background-color: #06B6D4 !important;
+}
+
+/* Metric Card Styling */
+[data-testid="stMetric"] {
+    background-color: #1E293B !important;
+    border: 1px solid #334155 !important;
+    border-radius: 12px !important;
+    padding: 1rem 1.25rem !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+
+[data-testid="stMetric"]:hover {
+    border-color: #06B6D4 !important;
+    box-shadow: 0 0 14px rgba(6, 182, 212, 0.2) !important;
+    transform: translateY(-2px) !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 1.85rem !important;
+    font-weight: 800 !important;
+    color: #F8FAFC !important;
+    letter-spacing: -0.02em !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.8rem !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.08em !important;
+    color: #94A3B8 !important;
+}
+
+/* Card Glowing Accents on Hover */
+.cyber-card-flagged:hover {
+    border-color: #EF4444 !important;
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.25) !important;
+}
+
+.cyber-card-warning:hover {
+    border-color: #F59E0B !important;
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.25) !important;
+}
+
+.cyber-card-safe:hover {
+    border-color: #10B981 !important;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.2) !important;
+}
+
+/* Expander Dark Styling */
+details[data-testid="stExpander"] {
+    background-color: #1E293B !important;
+    border: 1px solid #334155 !important;
+    border-radius: 10px !important;
+    margin-bottom: 0.75rem !important;
+}
+
+details[data-testid="stExpander"] > summary {
+    color: #F8FAFC !important;
+    font-weight: 600 !important;
+}
+
+/* Button Text Wrap Resilience */
+div.stButton > button {
+    white-space: normal !important;
+    word-break: break-word !important;
+}
+
+/* Sidebar Radio pill / highlight */
+[data-testid="stSidebar"] div[role="radiogroup"] > label {
+    padding: 0.4rem 0.75rem !important;
+    border-radius: 8px !important;
+    transition: background-color 0.15s ease !important;
+}
+
+[data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
+    background-color: rgba(56, 189, 248, 0.08) !important;
 }
 </style>
 """
@@ -571,12 +666,16 @@ def render_results_page() -> None:
         return
 
     # Action navigation buttons
-    nav_c1, nav_c2 = st.columns(2)
+    nav_c1, nav_c2, nav_c3 = st.columns(3)
     with nav_c1:
         if st.button("🔍 Run Another Scan", key="btn_run_another", use_container_width=True):
             st.session_state["current_page"] = PAGE_HOME
             st.rerun()
     with nav_c2:
+        if st.button("📈 View Analytics", key="btn_view_analytics_from_results", use_container_width=True):
+            st.session_state["current_page"] = PAGE_ANALYTICS
+            st.rerun()
+    with nav_c3:
         if st.button("📜 View Scan History", key="btn_view_hist_from_results", use_container_width=True):
             st.session_state["current_page"] = PAGE_HISTORY
             st.rerun()
@@ -661,7 +760,294 @@ def render_results_page() -> None:
 
 
 # ============================================================================
-# 9. Page 3: Scan History
+# 9. Page 3: Analytics & Trends Dashboard
+# ============================================================================
+def apply_cyber_theme(fig: go.Figure, title: str = "") -> go.Figure:
+    """Applies URL Guard dark navy/cyan cybersecurity theme to a Plotly figure."""
+    fig.update_layout(
+        title={
+            "text": title,
+            "font": {"size": 15, "color": "#F8FAFC", "family": "Segoe UI, -apple-system, sans-serif"},
+            "x": 0.02,
+            "xanchor": "left",
+        },
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"color": "#94A3B8", "family": "Segoe UI, -apple-system, sans-serif", "size": 12},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+            "font": {"color": "#CBD5E1"},
+        },
+        margin={"l": 30, "r": 20, "t": 55 if title else 25, "b": 30},
+        hoverlabel={
+            "bgcolor": "#1E293B",
+            "font_size": 12,
+            "font_color": "#F8FAFC",
+            "bordercolor": "#06B6D4",
+        },
+    )
+    fig.update_xaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="#1E293B",
+        zeroline=False,
+        tickfont={"color": "#94A3B8"},
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridwidth=1,
+        gridcolor="#1E293B",
+        zeroline=False,
+        tickfont={"color": "#94A3B8"},
+    )
+    return fig
+
+
+def render_analytics_page() -> None:
+    """Renders Page 3: Risk Analytics & Threat Trends dashboard."""
+    render_header()
+
+    st.markdown("### 📈 Risk Analytics & Historical Threat Trends")
+    st.markdown(
+        "Real-time telemetry, threat classification distribution, 7-day velocity trends, and host reputation intelligence."
+    )
+
+    # Cross-Navigation Shortcuts
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        if st.button("🔍 Scan New URL", key="btn_nav_home_from_analytics", use_container_width=True):
+            st.session_state["current_page"] = PAGE_HOME
+            st.rerun()
+    with col_b:
+        if st.button("📜 View Raw History", key="btn_nav_hist_from_analytics", use_container_width=True):
+            st.session_state["current_page"] = PAGE_HISTORY
+            st.rerun()
+    with col_c:
+        if st.button("🔄 Refresh Telemetry", key="btn_refresh_analytics", use_container_width=True):
+            st.rerun()
+
+    # Load and clean records
+    raw_history = get_history()
+    cleaned_all = clean_history_records(raw_history)
+
+    # Empty State Guard
+    if not cleaned_all:
+        st.info("ℹ️ No scan history records found yet. Start inspecting URLs on the Home Dashboard to generate threat analytics and historical trends.")
+        st.markdown(
+            """
+            <div class="cyber-card" style="text-align: center; padding: 2.5rem 1.5rem; margin-top: 1rem;">
+                <span style="font-size: 3rem;">📊</span>
+                <div style="font-size: 1.3rem; font-weight: 700; color: #38BDF8; margin-top: 10px;">
+                    Analytics Engine Standing By
+                </div>
+                <p style="color: #94A3B8; max-width: 550px; margin: 10px auto 0 auto; font-size: 0.95rem; line-height: 1.5;">
+                    Once URLs are scanned, URL Guard automatically aggregates threat scores, categorizes risk severity,
+                    and computes continuous 7-day velocity and 24-hour diurnal inspection cycles.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    # Time Window Filter Selector
+    st.markdown("#### ⏱️ Select Time Horizon Filter")
+    selected_window = st.radio(
+        "Time Horizon",
+        TIME_FILTERS,
+        index=1,
+        horizontal=True,
+        key="analytics_window_selector",
+        help="Filter metrics and trends by Today, Last 7 Days, or All Time.",
+    )
+
+    # Filter records by window
+    window_records = filter_history_by_window(cleaned_all, window=selected_window)
+    metrics = compute_metrics(window_records)
+
+    if len(window_records) == 0:
+        st.warning(
+            f"⚠️ No scans recorded for **{selected_window}**. "
+            f"(Found {len(cleaned_all)} total scan(s) in All Time)."
+        )
+
+    # 6 KPI Cyber Cards
+    st.markdown(f"#### 🎯 Key Security Metrics — {selected_window}")
+    kpi1, kpi2, kpi3 = st.columns(3)
+    with kpi1:
+        st.metric(
+            label="Total URLs Scanned",
+            value=f"{metrics.total_scans}",
+            help=f"{metrics.unique_domains_count} unique hostnames evaluated",
+        )
+    with kpi2:
+        st.metric(
+            label="High-Risk Detection Rate",
+            value=f"{metrics.high_risk_rate}%",
+            delta=f"{metrics.high_risk_count} dangerous URLs" if metrics.high_risk_count > 0 else "0 dangerous",
+            delta_color="inverse" if metrics.high_risk_count > 0 else "normal",
+            help="Percentage of scanned URLs classified as HIGH RISK (score > 50)",
+        )
+    with kpi3:
+        st.metric(
+            label="Average Risk Score",
+            value=f"{metrics.avg_risk_score} / 100",
+            delta=f"Peak: {metrics.max_risk_score}" if metrics.total_scans > 0 else None,
+            delta_color="off",
+            help="Mean heuristic risk score across scanned links in selected window",
+        )
+
+    tier1, tier2, tier3 = st.columns(3)
+    with tier1:
+        st.metric(
+            label="🟢 Low Risk (Safe)",
+            value=f"{metrics.low_risk_count} ({metrics.low_risk_pct}%)",
+            help="Score 0 - 20: Minimal or no suspicious indicators detected",
+        )
+    with tier2:
+        st.metric(
+            label="🟡 Medium Risk (Suspicious)",
+            value=f"{metrics.medium_risk_count} ({metrics.medium_risk_pct}%)",
+            help="Score 21 - 50: Moderate structural indicators detected",
+        )
+    with tier3:
+        st.metric(
+            label="🔴 High Risk (Dangerous)",
+            value=f"{metrics.high_risk_count} ({metrics.high_risk_pct}%)",
+            help="Score 51 - 100: Multiple severe phishing heuristics triggered",
+        )
+
+    st.markdown("---")
+    st.markdown("#### 📊 Threat Telemetry & Velocity Visualizations")
+
+    # Chart 1: Daily Trend Stacked Bar Chart
+    df_trend = get_daily_trend_data(cleaned_all, days=7)
+    fig_trend = go.Figure()
+    fig_trend.add_trace(go.Bar(
+        x=df_trend["date"],
+        y=df_trend[RISK_LOW],
+        name="Low Risk",
+        marker_color="#10B981",
+    ))
+    fig_trend.add_trace(go.Bar(
+        x=df_trend["date"],
+        y=df_trend[RISK_MEDIUM],
+        name="Medium Risk",
+        marker_color="#F59E0B",
+    ))
+    fig_trend.add_trace(go.Bar(
+        x=df_trend["date"],
+        y=df_trend[RISK_HIGH],
+        name="High Risk",
+        marker_color="#EF4444",
+    ))
+    fig_trend.update_layout(barmode="stack")
+    apply_cyber_theme(fig_trend, "Daily Scan Velocity & Threat Breakdown (Past 7 Days)")
+
+    # Chart 2: Threat Classification Donut Chart
+    if metrics.total_scans > 0:
+        labels = ["Low Risk", "Medium Risk", "High Risk"]
+        values = [metrics.low_risk_count, metrics.medium_risk_count, metrics.high_risk_count]
+        colors = ["#10B981", "#F59E0B", "#EF4444"]
+        fig_donut = go.Figure(data=[
+            go.Pie(
+                labels=labels,
+                values=values,
+                hole=0.62,
+                marker=dict(colors=colors, line=dict(color="#0B1120", width=2)),
+                textinfo="percent+label",
+                insidetextfont=dict(color="#FFFFFF", size=11),
+                hovertemplate="<b>%{label}</b><br>Count: %{value}<br>Proportion: %{percent}<extra></extra>",
+            )
+        ])
+        fig_donut.add_annotation(
+            text=f"<b>{metrics.total_scans}</b><br><span style='font-size:10px;color:#94A3B8'>TOTAL SCANS</span>",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color="#F8FAFC", family="Segoe UI, sans-serif"),
+        )
+    else:
+        fig_donut = go.Figure()
+        fig_donut.add_annotation(
+            text="No scans in selected window",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=13, color="#94A3B8"),
+        )
+    apply_cyber_theme(fig_donut, f"Threat Tier Distribution ({selected_window})")
+
+    # Render Row 1 Charts
+    c1, c2 = st.columns(2)
+    with c1:
+        st.plotly_chart(fig_trend, use_container_width=True)
+    with c2:
+        st.plotly_chart(fig_donut, use_container_width=True)
+
+    # Chart 3: Top Hostnames Horizontal Bar Chart
+    active_dataset = window_records if len(window_records) > 0 else cleaned_all
+    df_hosts = get_top_hostnames_data(active_dataset, top_n=8)
+    if not df_hosts.empty:
+        color_map = {
+            RISK_LOW: "#10B981",
+            RISK_MEDIUM: "#F59E0B",
+            RISK_HIGH: "#EF4444",
+        }
+        bar_colors = [color_map.get(c, "#38BDF8") for c in df_hosts["risk_classification"]]
+        fig_hosts = go.Figure(go.Bar(
+            x=df_hosts["scans"],
+            y=df_hosts["hostname"],
+            orientation="h",
+            marker_color=bar_colors,
+            hovertemplate="<b>%{y}</b><br>Scans: %{x}<extra></extra>",
+        ))
+        fig_hosts.update_layout(yaxis=dict(autorange="reversed"))
+        apply_cyber_theme(fig_hosts, "Top Evaluated Hostnames (by Volume)")
+    else:
+        fig_hosts = go.Figure()
+        fig_hosts.add_annotation(
+            text="No hostname data",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=13, color="#94A3B8"),
+        )
+        apply_cyber_theme(fig_hosts, "Top Evaluated Hostnames")
+
+    # Chart 4: 24-Hour Diurnal Scan Activity Distribution
+    df_hourly = get_hourly_distribution_data(active_dataset)
+    fig_hourly = go.Figure(go.Bar(
+        x=df_hourly["hour_label"],
+        y=df_hourly["count"],
+        marker_color="#06B6D4",
+        hovertemplate="<b>%{x} UTC</b><br>Inspections: %{y}<extra></extra>",
+    ))
+    apply_cyber_theme(fig_hourly, "24-Hour Diurnal Scan Distribution (UTC)")
+
+    # Render Row 2 Charts
+    c3, c4 = st.columns(2)
+    with c3:
+        st.plotly_chart(fig_hosts, use_container_width=True)
+    with c4:
+        st.plotly_chart(fig_hourly, use_container_width=True)
+
+    # Host Intelligence Detail Table
+    if not df_hosts.empty:
+        st.markdown("#### 🌐 Host Reputation & Velocity Intelligence")
+        rename_hosts = {
+            "hostname": "Hostname",
+            "scans": "Total Inspections",
+            "avg_score": "Average Risk Score",
+            "max_score": "Peak Risk Score",
+            "risk_classification": "Highest Severity Observed",
+        }
+        st.dataframe(df_hosts.rename(columns=rename_hosts), use_container_width=True)
+
+
+# ============================================================================
+# 10. Page 4: Scan History
 # ============================================================================
 def render_history_page() -> None:
     """Renders Page 3: Scan History with table, clear option, and CSV download."""
@@ -676,21 +1062,28 @@ def render_history_page() -> None:
         st.info("ℹ️ No scan history found. Previous scans will be logged here automatically.")
     else:
         df = pd.DataFrame(history)
+        for col in df.columns:
+            df[col] = df[col].astype(str).str.lstrip("'")
+
         rename_map = {
             "scan_date_time": "Timestamp (UTC)",
             "hostname": "Hostname",
             "risk_score": "Risk Score",
             "risk_classification": "Classification",
         }
-        df_display = df.rename(columns=rename_map)
+        df_display = df[::-1].rename(columns=rename_map)
         st.dataframe(df_display, use_container_width=True)
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
+            if st.button("📈 View Analytics", key="btn_view_analytics_from_hist", use_container_width=True):
+                st.session_state["current_page"] = PAGE_ANALYTICS
+                st.rerun()
+        with col2:
             if st.button("🗑️ Clear History", key="btn_clear_hist", use_container_width=True):
                 clear_history()
                 st.rerun()
-        with col2:
+        with col3:
             csv_data = export_history_csv()
             st.download_button(
                 label="📥 Download CSV Export",
@@ -703,10 +1096,10 @@ def render_history_page() -> None:
 
 
 # ============================================================================
-# 10. Page 4: About Project (College Evaluation & Viva Guide)
+# 11. Page 5: About Project (College Evaluation & Viva Guide)
 # ============================================================================
 def render_about_page() -> None:
-    """Renders Page 4: About Project containing academic evaluation walkthrough."""
+    """Renders Page 5: About Project containing academic evaluation walkthrough."""
     render_header()
 
     st.markdown("### 🎓 Academic College Evaluation Guide & Technical Overview")
@@ -895,6 +1288,8 @@ def main() -> None:
         render_home_page()
     elif st.session_state["current_page"] == PAGE_RESULTS:
         render_results_page()
+    elif st.session_state["current_page"] == PAGE_ANALYTICS:
+        render_analytics_page()
     elif st.session_state["current_page"] == PAGE_HISTORY:
         render_history_page()
     elif st.session_state["current_page"] == PAGE_ABOUT:

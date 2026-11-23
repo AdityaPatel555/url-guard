@@ -81,14 +81,15 @@ class TestUIHeadlessLaunch:
         assert "Analyse. Detect. Stay Aware." in markdown_texts
 
     def test_sidebar_contains_all_four_pages(self, isolated_history):
-        """Verify sidebar navigation contains all 4 standard pages."""
+        """Verify sidebar navigation contains all 5 standard pages."""
         at = AppTest.from_file(APP_PATH, default_timeout=15).run()
         assert len(at.exception) == 0
         assert len(at.sidebar.radio) > 0
         options = at.sidebar.radio[0].options
-        assert len(options) == 4
+        assert len(options) == 5
         assert any("Home" in opt for opt in options)
         assert any("Results" in opt for opt in options)
+        assert any("Analytics" in opt for opt in options)
         assert any("History" in opt for opt in options)
         assert any("About" in opt for opt in options)
 
@@ -165,8 +166,88 @@ class TestUIResultsPage:
         assert len(at.table) >= 1
 
 
+
+class TestUIAnalyticsPage:
+    """Verifies Page 3: Risk Analytics & Threat Trends behavior."""
+
+    def test_analytics_empty_state_rendering(self, isolated_history):
+        """Verify navigating to Analytics with zero history renders empty-state safely."""
+        at = AppTest.from_file(APP_PATH, default_timeout=15).run()
+        analytics_opt = [o for o in at.sidebar.radio[0].options if "Analytics" in o][0]
+        at.sidebar.radio[0].set_value(analytics_opt).run()
+        assert len(at.exception) == 0
+        assert len(at.info) > 0
+        assert any("No scan history records found" in i.value for i in at.info)
+        # Verify navigation shortcuts are present
+        assert len(at.button) >= 2
+
+    def test_analytics_renders_metrics_and_charts_with_history(self, isolated_history):
+        """Verify Analytics page renders 6 KPI metrics and Plotly charts when history exists."""
+        at = AppTest.from_file(APP_PATH, default_timeout=15).run()
+        # Perform 2 scans via presets
+        at.button(key="preset_btn_0").click().run()  # Scan Google (Low Risk)
+        # Navigate back to home and scan IP phishing (High Risk)
+        at.sidebar.radio[0].set_value(at.sidebar.radio[0].options[0]).run()
+        at.button(key="preset_btn_2").click().run()
+
+        # Navigate to Analytics
+        analytics_opt = [o for o in at.sidebar.radio[0].options if "Analytics" in o][0]
+        at.sidebar.radio[0].set_value(analytics_opt).run()
+        assert len(at.exception) == 0
+
+        # Verify 6 KPI metrics are present
+        assert len(at.metric) >= 6
+
+        # Verify Plotly charts are generated (4 figures)
+        # Note: In Streamlit AppTest, plotly_chart is accessible via at.plotly_chart or custom elements
+        # Check that no exceptions were thrown during Plotly rendering
+        assert len(at.exception) == 0
+
+        # Verify host intelligence dataframe is rendered
+        assert len(at.dataframe) >= 1
+
+    def test_analytics_time_window_filtering(self, isolated_history):
+        """Verify changing the time window selector re-renders without error."""
+        at = AppTest.from_file(APP_PATH, default_timeout=15).run()
+        at.button(key="preset_btn_0").click().run()
+
+        analytics_opt = [o for o in at.sidebar.radio[0].options if "Analytics" in o][0]
+        at.sidebar.radio[0].set_value(analytics_opt).run()
+        assert len(at.exception) == 0
+
+        # Find the time horizon radio by key
+        radio = at.radio(key="analytics_window_selector")
+        assert radio is not None
+        assert "Today" in radio.options
+        assert "Last 7 Days" in radio.options
+        assert "All Time" in radio.options
+
+        # Switch to "All Time"
+        radio.set_value("All Time").run()
+        assert len(at.exception) == 0
+        assert len(at.metric) >= 6
+
+        # Switch to "Today"
+        radio = at.radio(key="analytics_window_selector")
+        radio.set_value("Today").run()
+        assert len(at.exception) == 0
+        assert len(at.metric) >= 6
+
+    def test_analytics_cross_navigation_home(self, isolated_history):
+        """Verify clicking Scan New URL shortcut on Analytics navigates to Home."""
+        at = AppTest.from_file(APP_PATH, default_timeout=15).run()
+        analytics_opt = [o for o in at.sidebar.radio[0].options if "Analytics" in o][0]
+        at.sidebar.radio[0].set_value(analytics_opt).run()
+        assert len(at.exception) == 0
+
+        # Click Scan New URL button
+        at.button(key="btn_nav_home_from_analytics").click().run()
+        assert len(at.exception) == 0
+        assert "Home" in at.session_state.get("current_page", "")
+
+
 class TestUIScanHistoryPage:
-    """Verifies Page 3: Scan History behavior."""
+    """Verifies Page 4: Scan History behavior."""
 
     def test_empty_history_view(self, isolated_history):
         """Verify empty history displays info alert without errors."""

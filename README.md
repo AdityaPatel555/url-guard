@@ -81,12 +81,22 @@ Ordinary internet users often find it difficult to discern subtle URL anomalies,
 - **Subdomain Depth Analysis**: Evaluates hostname label complexity, accounting for common two-part country-code top-level domains (e.g., `.co.uk`, `.com.au`, `.edu.in`).
 
 ### User Interface & Experience
-- **Interactive Multi-Page Streamlit App**:
-  - **Page 1 (Home / Dashboard)**: Clean input box, quick sample URL buttons, instant analysis button, and security disclaimer.
-  - **Page 2 (Analysis Results)**: Big score metric, color-coded risk level badge, visual gauge, short recommendation, and 7 detailed check cards.
-  - **Page 3 (Scan History)**: Tabular overview of past scans, timestamp logging, clear history confirmation, and CSV download export.
-  - **Page 4 (About Project)**: Project overview, technical specifications, architecture diagrams, rule breakdown, and team credits.
-- **Cybersecurity Dark Aesthetic**: Deep navy theme (`#0B1120`, `#1E293B`) paired with high-contrast cyan accents (`#06B6D4`) and responsive card containers.
+- **Interactive Multi-Page Streamlit App (5 Dedicated Pages)**:
+  - **Page 1 (Home / Dashboard)**: Clean input box, quick demonstration preset sample URL buttons, instant analysis button, and security disclaimer.
+  - **Page 2 (Analysis Results)**: High-impact score metric hero, color-coded risk level badge, visual progress gauge, security recommendation, 7 detailed check evidence cards, and RFC component breakdown table.
+  - **Page 3 (Analytics & Trends Dashboard)**: Historical threat telemetry and risk visualization:
+    - **Time Horizon Filter**: Dynamically filter statistics across **Today**, **Last 7 Days (Week)**, and **All Time**.
+    - **6 Cyber KPI Metric Cards**: Total Scans, High-Risk Detection Rate %, Average Risk Score, and Low/Medium/High Risk counts & percentages.
+    - **Interactive Plotly Cyber Visualizations**:
+      - 7-day daily scan velocity and threat proportion stacked bar chart (zero-filled continuous time series).
+      - Threat classification distribution donut chart with Emerald (`#10B981`), Amber (`#F59E0B`), and Crimson (`#EF4444`).
+      - Top evaluated and riskiest hostnames horizontal bar chart and intelligence ranking table.
+      - 24-hour diurnal scan activity distribution (UTC hours 00:00 to 23:00).
+    - **Defensive State Handling**: Graceful empty-state graphics when no scan history exists or when the filtered horizon has 0 scans.
+    - **Seamless Cross-Navigation**: Direct jump shortcuts between Home, Results, Analytics, and History.
+  - **Page 4 (Scan History)**: Tabular audit log of past scans (most recent first), formula-injection-stripped display, clear history option, and local CSV download export.
+  - **Page 5 (About Project)**: Project overview, academic college evaluation walkthrough, technical specifications, detection rule table, security guarantees, limitations, and team credits.
+- **Cybersecurity Dark Aesthetic**: Deep navy theme (`#0B1120`, `#1E293B`) paired with high-contrast cyan accents (`#06B6D4`, `#38BDF8`), hover glow borders, styled metric cards (`[data-testid="stMetric"]`), and dark expander panels.
 
 ---
 
@@ -96,12 +106,14 @@ Ordinary internet users often find it difficult to discern subtle URL anomalies,
 |---|---|---|---|
 | **Language** | Python | 3.10+ | Core programming and business logic |
 | **Frontend Framework** | Streamlit | >= 1.30.0 | Reactive interactive dashboard and UI components |
+| **Visualizations** | Plotly | >= 6.0.0 | Cyber-themed interactive charts (donut, stacked bar, horizontal bar) |
+| **Data Aggregation** | Pandas | >= 2.0.0 | Telemetry dataframe manipulation, time grouping, zero-filling |
 | **URL Parsing** | `urllib.parse` | Standard Library | RFC 3986 URL splitting and unquoting |
 | **IP Address Analysis** | `ipaddress` | Standard Library | Robust IPv4 / IPv6 parsing and classification |
 | **Pattern Matching** | `re` | Standard Library | Regular expressions for keyword and character heuristics |
-| **Data Persistence** | `csv` & `pathlib` | Standard Library | Safe local file I/O for scan history |
+| **Data Persistence** | `csv` & `pathlib` | Standard Library | Safe local file I/O for scan history with DDE defense |
 | **Data Structures** | `dataclasses` & `enum` | Standard Library | Strongly typed domain models and result contracts |
-| **Testing** | Pytest | >= 7.0.0 | Automated unit, boundary, scenario, and E2E testing |
+| **Testing** | Pytest | >= 7.0.0 | Automated unit, boundary, scenario, headless UI, and E2E testing |
 
 ---
 
@@ -169,9 +181,20 @@ URL Guard follows a strictly decoupled, modular pipeline architecture:
       |  storage/history_manager|          |         app.py          |
       |  - Append to CSV file   |          |  - Render Home Page     |
       |  - Redact queries/auth  |          |  - Render Results Cards |
-      |  - Clear & Export CSV   |          |  - Render History Table |
-      |  - Data: scan_history.csv          |  - Render About Page    |
-      +-------------------------+          +-------------------------+
+      |  - Clear & Export CSV   |          |  - Render Analytics     |
+      |  - Data: scan_history   |          |  - Render History Table |
+      +------------+------------+          |  - Render About Page    |
+                   |                       +------------+------------+
+                   | Raw History                        ^
+                   v                                    | Cleaned KPIs
+      +-------------------------+                       | & DataFrames
+      |    core/analytics.py    |-----------------------+
+      |  - Formula quote strip  |
+      |  - Window filtering     |
+      |  - 7-day velocity series|
+      |  - Diurnal distribution|
+      |  - Domain intelligence  |
+      +-------------------------+
 ```
 
 ---
@@ -192,26 +215,29 @@ URL-GUARD/
 │   ├── parser.py               # RFC component parser, IDN, IPv4/v6 normalizer
 │   ├── detector.py             # 7 independent heuristic detection rules
 │   ├── risk_calculator.py      # Score accumulator, cap, tier classifier
-│   └── report_generator.py     # Comprehensive structured report compiler
+│   ├── report_generator.py     # Comprehensive structured report compiler
+│   └── analytics.py            # Pure aggregation, window filtering & trends engine
 │
 ├── storage/                    # Local data persistence
 │   ├── __init__.py             # Storage package initialization
-│   └── history_manager.py      # CSV scan log manager with privacy redaction
+│   └── history_manager.py      # CSV scan log manager with privacy redaction & locking
 │
 ├── data/                       # Data persistence directory
 │   ├── .gitkeep                # Keeps directory structure in git tracking
-│   └── scan_history.csv        # Local CSV scan log (auto-created on first scan)
+│   ├── scan_history.csv        # Local CSV scan log (auto-created on first scan)
+│   └── scan_history.csv.bak    # Baseline scan history backup snapshot
 │
-└── tests/                      # Automated test suite (325 test cases)
+└── tests/                      # Automated test suite (354 test cases)
     ├── __init__.py             # Test package initialization
     ├── conftest.py             # Shared pytest fixtures and sys.path setup
-    ├── test_validator.py       # Validator module unit & boundary tests
-    ├── test_parser.py          # Component extraction & normalization tests
-    ├── test_detector.py        # Independent unit tests for all 7 checks
-    ├── test_risk_calculator.py # Score summation, boundary & capping tests
-    ├── test_history.py         # CSV file persistence & privacy redaction tests
-    ├── test_ui_smoke.py        # Streamlit session state and UI smoke tests
-    └── test_e2e_scenarios.py   # 152 comprehensive end-to-end scenario tests
+    ├── test_validator.py       # Validator module unit & boundary tests (55 tests)
+    ├── test_parser.py          # Component extraction & normalization tests (13 tests)
+    ├── test_detector.py        # Independent unit tests for all 7 checks (29 tests)
+    ├── test_risk_calculator.py # Score summation, boundary & capping tests (14 tests)
+    ├── test_history.py         # CSV file persistence & privacy redaction tests (46 tests)
+    ├── test_analytics.py       # Analytics aggregation, filtering & trends tests (24 tests)
+    ├── test_ui_smoke.py        # Streamlit AppTest headless smoke tests (21 tests)
+    └── test_e2e_scenarios.py   # Comprehensive end-to-end scenario tests (152 tests)
 ```
 
 ---
@@ -300,7 +326,7 @@ Once launched, Streamlit will automatically open your default browser to:
 
 ## 11. How to Execute Tests
 
-The project includes an exhaustive automated test suite with **325 tests** covering unit behavior, boundary thresholds, pairwise cross-feature interactions, and end-to-end attack scenarios.
+The project includes an exhaustive automated test suite with **354 tests** covering unit behavior, boundary thresholds, pairwise cross-feature interactions, analytics time-window aggregations, and end-to-end attack scenarios.
 
 ### Run All Tests
 ```bash
@@ -315,6 +341,7 @@ python -m pytest tests/test_parser.py -v
 python -m pytest tests/test_detector.py -v
 python -m pytest tests/test_risk_calculator.py -v
 python -m pytest tests/test_history.py -v
+python -m pytest tests/test_analytics.py -v
 python -m pytest tests/test_ui_smoke.py -v
 
 # Run the 152 End-to-End Scenarios
@@ -325,17 +352,18 @@ python -m pytest tests/test_e2e_scenarios.py -v
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.13.x, pytest-9.x.x
-collected 325 items
+collected 354 items
 
-tests/test_detector.py .............................                    [  8%]
-tests/test_e2e_scenarios.py ............................................ [ 55%]
-tests/test_history.py .........................                         [ 63%]
-tests/test_parser.py ..................................                 [ 73%]
-tests/test_risk_calculator.py ..........................                [ 81%]
-tests/test_ui_smoke.py ..........                                       [ 84%]
+tests/test_analytics.py ........................                         [  6%]
+tests/test_detector.py .............................                    [ 14%]
+tests/test_e2e_scenarios.py ............................................ [ 57%]
+tests/test_history.py .................................................. [ 70%]
+tests/test_parser.py .............                                       [ 74%]
+tests/test_risk_calculator.py ..............                             [ 78%]
+tests/test_ui_smoke.py .....................                             [ 84%]
 tests/test_validator.py ............................................... [100%]
 
-============================= 325 passed in 8.79s =============================
+============================ 354 passed in 10.71s =============================
 ```
 
 ---
@@ -407,7 +435,35 @@ tests/test_validator.py ............................................... [100%]
 +---------------------------------------------------------------------------------+
 ```
 
-### Page 3: Scan History
+### Page 3: Analytics & Trends Dashboard
+```text
++---------------------------------------------------------------------------------+
+|  [ 🔍 Scan New URL ]       [ 📜 View Raw History ]       [ 🔄 Refresh Telemetry ]|
+|                                                                                 |
+|  TIME HORIZON FILTER:  ( ) Today   (*) Last 7 Days   ( ) All Time               |
+|                                                                                 |
+|  +-----------------------+ +-----------------------+ +------------------------+ |
+|  | TOTAL URLS SCANNED    | | HIGH-RISK DETECTION   | | AVERAGE RISK SCORE     | |
+|  | 28 Scans              | | 14.3% (4 dangerous)   | | 24.8 / 100             | |
+|  +-----------------------+ +-----------------------+ +------------------------+ |
+|  +-----------------------+ +-----------------------+ +------------------------+ |
+|  | [!] LOW RISK (SAFE)   | | [!] MEDIUM RISK       | | [!] HIGH RISK (DANGER) | |
+|  | 18 (64.3%)            | | 6 (21.4%)             | | 4 (14.3%)              | |
+|  +-----------------------+ +-----------------------+ +------------------------+ |
+|                                                                                 |
+|  DAILY SCAN VELOCITY (STACKED BAR)          THREAT CLASSIFICATION (DONUT)       |
+|  [|||| Low ] [||| Med ] [|| High ]          [ 🟢 64.3% ] [ 🟡 21.4% ] [ 🔴 14.3%]|
+|  Mon Tue Wed Thu Fri Sat Sun                Total Scans: 28                     |
+|                                                                                 |
+|  TOP EVALUATED HOSTNAMES (HORIZONTAL BAR)   24-HOUR DIURNAL ACTIVITY (UTC)      |
+|  google.com    [=====================] 12   00:00 - 06:00 [==] 3                |
+|  192.168.1.1   [========] 4                 06:00 - 12:00 [=======] 8           |
+|  phish-portal  [====] 2                     12:00 - 18:00 [============] 13     |
+|                                             18:00 - 24:00 [====] 4              |
++---------------------------------------------------------------------------------+
+```
+
+### Page 4: Scan History
 ```text
 +---------------------------------------------------------------------------------+
 |  SCAN AUDIT LOG                                          [ Download CSV Export ]|
@@ -428,7 +484,7 @@ tests/test_validator.py ............................................... [100%]
 +---------------------------------------------------------------------------------+
 ```
 
-### Page 4: About Project
+### Page 5: About Project
 ```text
 +---------------------------------------------------------------------------------+
 |  ABOUT URL GUARD                                                                |
