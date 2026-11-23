@@ -421,3 +421,73 @@ class TestLoadAndPrepareAnalytics:
         assert metrics.high_risk_count == 1
         assert metrics.low_risk_count == 1
         assert metrics.avg_risk_score == 47.5
+
+
+# ---------------------------------------------------------------------------
+# Bug Fix & Defensive Robustness Tests (Challenger 1 Probes)
+# ---------------------------------------------------------------------------
+
+class TestDefensiveBugFixes:
+    """Verifies edge cases identified by adversarial audit Challenger 1."""
+
+    def test_score_infinity_overflow_handling(self):
+        """Verifies 'inf', '-inf', '1e1000', and float('inf') are safely skipped without OverflowError."""
+        records = [
+            {"scan_date_time": "2026-11-23T10:00:00Z", "hostname": "inf-pos.com", "risk_score": "inf", "risk_classification": "HIGH RISK"},
+            {"scan_date_time": "2026-11-23T10:00:00Z", "hostname": "inf-neg.com", "risk_score": "-inf", "risk_classification": "LOW RISK"},
+            {"scan_date_time": "2026-11-23T10:00:00Z", "hostname": "inf-exp.com", "risk_score": "1e1000", "risk_classification": "HIGH RISK"},
+            {"scan_date_time": "2026-11-23T10:00:00Z", "hostname": "inf-float.com", "risk_score": float("inf"), "risk_classification": "HIGH RISK"},
+            {"scan_date_time": "2026-11-23T10:00:00Z", "hostname": "nan-str.com", "risk_score": "nan", "risk_classification": "LOW RISK"},
+            {"scan_date_time": "2026-11-23T10:00:00Z", "hostname": "valid.com", "risk_score": 75, "risk_classification": "HIGH RISK"},
+        ]
+        cleaned = clean_history_records(records)
+        assert len(cleaned) == 1
+        assert cleaned[0]["hostname"] == "valid.com"
+        assert cleaned[0]["risk_score"] == 75
+
+    def test_non_dict_first_element_handling(self):
+        """Verifies compute_metrics([None]), filter_history_by_window([123], 'Today'), etc., return safe defaults."""
+        # compute_metrics([None]) returns zeroed metrics
+        metrics = compute_metrics([None])
+        assert isinstance(metrics, AnalyticsMetrics)
+        assert metrics.total_scans == 0
+
+        # filter_history_by_window([123], 'Today') returns empty list
+        filtered = filter_history_by_window([123], "Today")
+        assert filtered == []
+
+        # get_daily_trend_data([None]) returns zero-filled 7 days
+        df_trend = get_daily_trend_data([None], days=7)
+        assert len(df_trend) == 7
+        assert (df_trend["total"] == 0).all()
+
+        # get_hourly_distribution_data([None]) returns 24 zero-filled hours
+        df_hourly = get_hourly_distribution_data([None])
+        assert len(df_hourly) == 24
+        assert (df_hourly["count"] == 0).all()
+
+        # get_top_hostnames_data([None]) returns empty DataFrame with expected columns
+        df_top = get_top_hostnames_data([None])
+        assert len(df_top) == 0
+        assert list(df_top.columns) == ["hostname", "scans", "avg_score", "max_score", "risk_classification"]
+
+    def test_last_7_days_does_not_include_tomorrow(self, fixed_ref_time):
+        """Verifies scans timestamped tomorrow (ref_time + 1 day) are excluded from 'Last 7 Days'."""
+        tomorrow_ts = (fixed_ref_time + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        today_ts = fixed_ref_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+        eight_days_ago_ts = (fixed_ref_time - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        records = [
+            {"scan_date_time": tomorrow_ts, "hostname": "tomorrow.com", "risk_score": 50, "risk_classification": "MEDIUM RISK"},
+            {"scan_date_time": today_ts, "hostname": "today.com", "risk_score": 10, "risk_classification": "LOW RISK"},
+            {"scan_date_time": eight_days_ago_ts, "hostname": "old.com", "risk_score": 80, "risk_classification": "HIGH RISK"},
+        ]
+
+        filtered = filter_history_by_window(records, FILTER_LAST_7_DAYS, ref_time=fixed_ref_time)
+        assert len(filtered) == 1
+        assert filtered[0]["hostname"] == "today.com"
+
+        # Also verify alignment with get_daily_trend_data:
+        df_trend = get_daily_trend_data(records, days=7, ref_time=fixed_ref_time)
+        assert df_trend["total"].sum() == len(filtered) == 1
+

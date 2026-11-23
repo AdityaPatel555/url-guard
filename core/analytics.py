@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
 import logging
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -123,9 +124,12 @@ def clean_history_records(records: Sequence[Dict[str, Any]]) -> List[Dict[str, A
         raw_score = item.get("risk_score", 0)
         try:
             score_str = str(raw_score).strip().lstrip("'").strip()
-            score_val = int(round(float(score_str)))
+            score_float = float(score_str)
+            if math.isinf(score_float) or math.isnan(score_float):
+                continue
+            score_val = int(round(score_float))
             score_clamped = max(0, min(100, score_val))
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             # Corrupted score row; skip
             continue
 
@@ -170,7 +174,7 @@ def filter_history_by_window(
         return []
 
     # Ensure records are cleaned and possess 'datetime'
-    if records and "datetime" not in records[0]:
+    if records and not (isinstance(records[0], dict) and "datetime" in records[0]):
         cleaned_records = clean_history_records(records)
     else:
         cleaned_records = list(records)
@@ -192,9 +196,10 @@ def filter_history_by_window(
         return [r for r in cleaned_records if r["datetime"].date() == target_date]
 
     if normalized_window in ("last 7 days", "week", "last_7_days", "filter_last_7_days"):
-        start_cutoff = ref_time - timedelta(days=7)
-        # Include records from start_cutoff up through the end of ref_time's day
-        end_cutoff = ref_time + timedelta(days=1)
+        ref_date = ref_time.date()
+        start_date = ref_date - timedelta(days=6)
+        start_cutoff = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_cutoff = datetime.combine(ref_date, datetime.max.time(), tzinfo=timezone.utc)
         return [
             r for r in cleaned_records
             if start_cutoff <= r["datetime"] <= end_cutoff
@@ -227,7 +232,7 @@ def compute_metrics(records: Sequence[Dict[str, Any]]) -> AnalyticsMetrics:
         )
 
     # Ensure records are clean
-    if "datetime" not in records[0]:
+    if not (isinstance(records[0], dict) and "datetime" in records[0]):
         clean_list = clean_history_records(records)
     else:
         clean_list = list(records)
@@ -302,7 +307,7 @@ def get_daily_trend_data(
         ref_time = ref_time.astimezone(timezone.utc)
 
     # Ensure records are cleaned
-    if records and "datetime" not in records[0]:
+    if records and not (isinstance(records[0], dict) and "datetime" in records[0]):
         clean_list = clean_history_records(records)
     else:
         clean_list = list(records) if records else []
@@ -352,7 +357,7 @@ def get_hourly_distribution_data(
     """
     columns = ["hour", "hour_label", "count"]
 
-    if records and "datetime" not in records[0]:
+    if records and not (isinstance(records[0], dict) and "datetime" in records[0]):
         clean_list = clean_history_records(records)
     else:
         clean_list = list(records) if records else []
@@ -386,7 +391,7 @@ def get_top_hostnames_data(
     if not records:
         return pd.DataFrame(columns=columns)
 
-    if "datetime" not in records[0]:
+    if not (isinstance(records[0], dict) and "datetime" in records[0]):
         clean_list = clean_history_records(records)
     else:
         clean_list = list(records)
